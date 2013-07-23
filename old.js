@@ -117,12 +117,7 @@ function invoice(to,amount,comment){
             $(".createBill form #value").val(amount);
             $(".createBill form #comment").val(comment);
             $(".createBill form #value").keyup();
-
-
-
         },to,amount,comment);
-
-
 
         img();
 
@@ -198,11 +193,8 @@ var steps = [
             $('#password').val('xteZ4Vp');
             $('.auth-wrap form .submit').click()
         });
-
-
     },
     function(){
-
         console.log("login")
     }
 ]
