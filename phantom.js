@@ -2,7 +2,12 @@
 var casper = require('casper').create();
 var webpage = require("webpage");
 
-function Page
+var args = require('system').args;
+var fs = require("fs");
+if (args[0]){
+    var cnf = fs.read(args[0]);
+
+}
 
 
 function QiwiClient(login,password){
