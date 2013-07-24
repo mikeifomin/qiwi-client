@@ -2,6 +2,8 @@
 var casper = require('casper').create();
 var webpage = require("webpage");
 
+function Page
+
 
 function QiwiClient(login,password){
         this.base_URL = "https://visa.qiwi.com/"
@@ -41,16 +43,29 @@ function QiwiClient(login,password){
         }
 
 }
+
+
+
 QiwiClient.prototype.flushStack = function(){
     this.stack = [];
 }
+
 
 
 QiwiClient.prototype.push = function(function_,params){
     // TODO: make push sync and async!
         this.stack.push({
             fn:function_,
-            params:params
+            params:params,
+            sync:false
+        })
+}
+QiwiClient.prototype.push_sync = function(function_,params){
+    // TODO: make push sync and async!
+        this.stack.push({
+            fn:function_,
+            params:params,
+            sync:true
         })
 }
 
@@ -59,6 +74,9 @@ QiwiClient.prototype.nextStep = function(){
             this.lastStep = this.stack.shift();
             // execute function (with params) from stack
             this.lastResult = this.lastStep.fn(this.lastStep.params);
+            if (this.lastStep.sync){
+                this.nextStep();
+            }
         }
 }
 
@@ -114,9 +132,8 @@ QiwiClient.prototype.checkInvoiceList = function(startDate, endDate){
 
 }
 
-QiwiClient.prototype.reportCheck = function(startDate, endDate){
-
-
+QiwiClient.prototype._startFinishDateFormat = function(){
+    var result;
     var d = new Date();
     var formatedFinishDate = d.getDate() + '.' + (d.getMonth() + 1) + "." + d.getFullYear();
 
@@ -129,25 +146,56 @@ QiwiClient.prototype.reportCheck = function(startDate, endDate){
     }
     var formatedStartDate = d.getDate() + '.' + (d.getMonth() + 1) + "." + d.getFullYear();
 
+
+    result +=  "&start=" + formatedStartDate;
+    result +=  "&finish=" + formatedFinishDate;
+
+    return result;
+
+}
+
+
+QiwiClient.prototype.reportCheck = function(startDate, endDate){
     var url = this.base_URL;
     url += "report/list.action?daterange=true";
-    url +=  "&start=" + formatedStartDate;
-    url +=  "&finish=" + formatedFinishDate;
+    url +=  this._startFinishDateFormat();
 
     this.push(this.page.open, url);
 
+    this.push_sync(function(){
+        var updatedTransactionInfo = this.page.evaluate(function(cachedTransaction){
+            var updatedTransaction = {};
+            var updatedTransactionCount = 0;
+            function scanList(selector,state){
+                var items = $(selector);
+                for (var i = 0; i<items.length; i++){
+                    var record = {
+                        transaction:$(".transaction",item[i]).text(),
+                        date: $(".date",item[i]).text(),
+                        time: $(".time",item[i]).text(),
+                        income: $(".income .cash",item[i]).text(),
+                        outcome: $(".expenditure .cash",item[i]).text(),
+                        comment: $(".comment",item[i]).text(),
+                        commentFull: $(".ProvWithComment",item[i]).text(),
+                        state:state
+                    }
+                    if (cachedTransaction[record.transaction] == undefined || cachedTransaction[record.transaction].state != record.state){
+                        updatedTransaction[record.transaction] = record;
+                        updatedTransactionCount++;
+                    }
+                }
+            }
+            scanList(".orders .ordersLine.ERROR","err");
+            scanList(".orders .ordersLine.SUCCESS","ok");
+            return [updatedTransactionCount,updatedTransaction]
+        },this.cachedTransaction)
 
-
-
+        // if `updatedTransaction` not empty
+        if (updatedTransactionInfo[0]){
+            this.cachedTransaction = updatedTransactionInfo[1]
+        }
+    })
 }
-
-
-
-QiwiClient.prototype.onBalanceChange = function(startDate, endDate){
-
-}
-
-
 
 
 function Server(host,password){
@@ -156,7 +204,7 @@ function Server(host,password){
 
 }
 
-Server.prototype. = function(login,password){
+Server.prototype.command = function(login,password){
 
     this.login = login;
     this.password = password;
@@ -164,16 +212,3 @@ Server.prototype. = function(login,password){
 
 
 }
-
-
-//var casper = require('casper').create();
-
-casper.start('http://casperjs.org/', function() {
-    this.echo(this.getTitle());
-});
-
-casper.thenOpen('http://phantomjs.org', function() {
-    this.echo(this.getTitle());
-});
-console.log(phantom)   ;
-casper.run();
