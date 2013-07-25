@@ -202,6 +202,46 @@ QiwiClient.prototype.reportCheck = function(startDate, endDate){
     })
 }
 
+QiwiClient.prototype.invoiceCheck = function(){
+    var url = this.base_URL;
+    url += "order/list.action?type=2";
+
+    this.push(this.page.open, url);
+
+    this.push_sync(function(){
+        var updatedTransactionInfo = this.page.evaluate(function(cachedInvoiceTransaction){
+            var updatedInvoiceTransaction = {};
+            var updatedInvoiceTransactionCount = 0;
+            function scanList(selector,state){
+                var items = $(selector);
+                for (var i = 0; i<items.length; i++){
+                    var record = {
+                        creation:$(".orderCreationDate",arr[i]).text(),
+                        account:$(".from",arr[i]).text().replace(/^\s+|\s+$/g, ''),
+                        transaction:$(".transaction",arr[i]).text().replace(/^\s+|\s+$/g, ''),
+                        comment:$(".CommentWrap",arr[i]).text().replace(/^\s+|\s+$/g, ''),
+                        amount:$(".amount",arr[i]).text(),
+                        state:state
+                    }
+                    if (cachedTransaction[record.transaction] == undefined || cachedTransaction[record.transaction].state != record.state){
+                        updatedInvoiceTransaction[record.transaction] = record;
+                        updatedInvoiceTransactionCount++;
+                    }
+                }
+            }
+            scanList(".orders .ordersLine.CANCELED","cancel");
+            scanList(".orders .ordersLine.PAID","paid");
+            scanList(".orders .ordersLine.NOT_PAID","pay-wait");
+            return [updatedInvoiceTransactionCount,updatedInvoiceTransaction]
+        },this.cachedInvoiceTransaction)
+
+        // if `updatedTransaction` not empty
+        if (updatedInvoiceTransactionInfo[0]){
+            this.cachedInvoiceTransaction = updatedTransactionInfo[1]
+        }
+    })
+}
+
 
 function Server(host,password){
     this.host = typeof host !== "undefined" ? host: "localhost";
@@ -210,10 +250,6 @@ function Server(host,password){
 }
 
 Server.prototype.command = function(login,password){
-
     this.login = login;
     this.password = password;
-
-
-
 }
