@@ -1,12 +1,34 @@
 
-var casper = require('casper').create();
 var webpage = require("webpage");
 
 var args = require('system').args;
 var fs = require("fs");
-if (args[0]){
-    var cnf = fs.read(args[0]);
+var child_process = require("child_process") ;
 
+if (args[1]){
+    var config = {};
+    var rawConfig = fs.read(args[1]).split(/\r|\r\n|\n/);
+
+    for (var i=0; i<rawConfig.length; i++){
+        try{
+            var parsed = rawConfig[i].split("=");
+
+            if (parsed.length == 91){
+                console.log(parsed.replace(/^\s+|\s+$/g, ''));
+                var key = parsed.replace(/^\s+|\s+$/g, '') ;
+                console.log(key) ;
+                config[key] = true;
+            } else {
+                var key = parsed[0].replace(/^\s+|\s+$/g, '') ;
+                config[key] = parsed[1]?"":true;
+                var value = parsed[1].replace(/^\s+|\s+$/g, '');
+                config[key] = value ;
+            }
+        } catch(e) { }
+    }
+} else{
+    console.log("need argument with filename of config")
+    phantom.exit()
 }
 
 
@@ -21,6 +43,11 @@ function QiwiClient(login,password){
         this.stack = [];
         this.is_run = false;
         this.watchDogTimeout = 4000;
+
+        // page for sending event to other script using http POST
+        this.messagePage = webpage.create();
+        // handler for exec external script
+        this.exec = require("child_process").execFile
 
         this.page = webpage.create();
         this.accountBalance = undefined;
@@ -57,19 +84,19 @@ QiwiClient.prototype.flushStack = function(){
 
 
 
-QiwiClient.prototype.push = function(function_,params){
-    // TODO: make push sync and async!
+QiwiClient.prototype.push = function(function_){
+
         this.stack.push({
             fn:function_,
-            params:params,
+            params:arguments.slice(1),
             sync:false
         })
 }
-QiwiClient.prototype.push_sync = function(function_,params){
-    // TODO: make push sync and async!
+QiwiClient.prototype.push_sync = function(function_){
+
         this.stack.push({
             fn:function_,
-            params:params,
+            params:arguments.slice(1),
             sync:true
         })
 }
@@ -78,7 +105,7 @@ QiwiClient.prototype.nextStep = function(){
         if (this.stack.length){
             this.lastStep = this.stack.shift();
             // execute function (with params) from stack
-            this.lastResult = this.lastStep.fn(this.lastStep.params);
+            this.lastResult = this.lastStep.fn.apply(this,this.lastStep.params);
             if (this.lastStep.sync){
                 this.nextStep();
             }
@@ -118,7 +145,6 @@ QiwiClient.prototype.doLogin = function(){
 
     this.login = login;
     this.password = password;
-
 }
 
 QiwiClient.prototype.makePay = function(account,amount,comment,cb){
@@ -158,6 +184,7 @@ QiwiClient.prototype._startFinishDateFormat = function(){
     return result;
 
 }
+
 
 
 QiwiClient.prototype.reportCheck = function(startDate, endDate){
