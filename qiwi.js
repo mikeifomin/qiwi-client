@@ -29,8 +29,8 @@ function QiwiClient(config){
 QiwiClient.prototype.run = function(){
 
     this.page = webpage.create();
-    this.page.settings.userAgent = 'YBot';
-    this.page.open("http://qiwi.ru") ;
+//    this.page.settings.userAgent = 'YBot';
+//    this.page.open("http://qiwi.ru") ;
 
     // TODO: what if stack of will full jobs like add invoice? This causes that `reportCheck` on `invoiceCheck` will not done while jobs ended.
     // this watcher for situation while two transaction(for example: incoming 100 and outcoming 100 )
@@ -38,7 +38,7 @@ QiwiClient.prototype.run = function(){
     // And for detect invoice change state that not affected cash on account
     this._watchDogInterval = setInterval(
         (function(self){
-            log("self ",self);
+//            log("self ",self);
             self.watchDog.call(self) ;
 
         })(this),
@@ -51,15 +51,20 @@ QiwiClient.prototype.run = function(){
         // TODO: what about `this`?
         this.page.onResourceReceived = this.ResourceWatcherForCheckBalance
     }
-
-    this.page.onLoadFinished = function (status){
+    this.testVar = 'test var' ;
+    this.page.onLoadFinished = (function (status,self){
+        log('self onLoadFinished',self);
+        log('status onLoadFinished',status);
         if (status == "success"){
-            this.nextStep();
+            self.nextStep();
         }
-    }
+    })(this);
+
     this.doLogin();
-    log("run done");
+
+    this.nextStep();
 }
+
 QiwiClient.prototype.ResourceWatcherForCheckBalance = function(response) {
     if (response.url == "https://visa.qiwi.com/person/state.action"){
         var balance = this.page.evalute(function(){
@@ -125,6 +130,7 @@ QiwiClient.prototype.push_sync = function(function_){
 }
 
 QiwiClient.prototype.nextStep = function(){
+    log('next step',this.stack.length);
     if (this.stack.length){
         this.lastStep = this.stack.shift();
         // execute function (with params) from stack
@@ -136,9 +142,14 @@ QiwiClient.prototype.nextStep = function(){
 }
 
 QiwiClient.prototype.open = function(url){
-       this.page.open(url,function(status){
-           log(status);
-       });
+       log('try to open ', url) ;
+       log('this.page ', this.page);
+       this.page.open(url,(function(self){
+           var f = function(status){
+                  self.nextStep();
+           }
+           return f;
+       })(this));
 }
 
 QiwiClient.prototype.submit = function(formData, selector, submitSelector){
