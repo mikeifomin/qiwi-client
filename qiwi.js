@@ -1,4 +1,5 @@
 var webpage = require("webpage");
+var webserver = require("webserver");
 var child_process = require("child_process");
 function log(text, obj){
     var date = new Date()
@@ -25,7 +26,7 @@ function QiwiClient(config){
     this.is_run = false;
     log("inited with",this.config)
 }
-
+//QiwiClient.prototype = new Server();
 QiwiClient.prototype.run = function(){
 
     this.page = webpage.create();
@@ -104,7 +105,7 @@ QiwiClient.prototype.flushStack = function(){
 
 
 QiwiClient.prototype.push = function(function_){
-    log("just pushed",function_) ;
+    log("just pushed",function_);
     var params = [];
     for (var i=1;i<arguments.length;i++){
         params.push(arguments[i]);
@@ -335,7 +336,7 @@ QiwiClient.prototype.sendToExternal = function(address, data){
         this.messagePage.open(address,"post",payload,(function(status){
             if (status == "success" ){
                 if (this.content.search("ok")){
-                    log("message send, ok resive")
+                    log("message send, ok resive");
                 }
 
             } else {
@@ -345,18 +346,124 @@ QiwiClient.prototype.sendToExternal = function(address, data){
     }
 }
 
-function Server(host,post){
-    this.host = typeof host !== "undefined" ? host: "localhost";
-    this.port = typeof port !== "undefined" ? post: 28009;
+function Server(){
+      this.FUNCTION_SIGNATURE = "command_" ;
+}
+
+
+Server.prototype.init = function(bind){
+    if (!bind && this.hasOwnProperty("config")){
+        if (this.config.hasOwnProperty("bind")){
+            this.serverBind = this.config.bind;
+        }
+
+    }
+    this.serverBind = this.serverBind || "127.0.0.1:5004";
+    this.serverHandler = webserver.create();
+    console.log(this.serverBind);
+    this.serverHandler.listen(this.serverBind, (function(self){
+        var f = function(req,res){
+            console.log(req.url);
+            self.requestHeader.call(self, req, res)  ;
+                ;
+        }
+        return f;
+    })(this));
+
+
+//    this.serverHandler.listen(this.serverBind,function(request, response) {
+//        response.statusCode = 200;
+//        response.write('<html><body>Hello!</body></html>');
+//        response.close();
+//    } );
+}
+
+
+Server.prototype.requestHeader = function(req, res){
+
+
+
+
+
+        var url = this.urlParse(req.url);
+        var property = this.FUNCTION_SIGNATURE + url.pathname.slice(1).replace("/","_");
+//    console.log(this.hasOwnProperty(property));
+
+    if (typeof this[property] == "function") {
+        res.statusCode = 200;
+        try{
+            this[property].call(this,req, res,url);
+
+        } catch (e){
+
+            res.write("error - ");
+            res.write(e.name);
+            res.close();
+        }
+        //        res.close();
+    } else {
+
+
+        res.statusCode = 404;
+        res.write("command not found");
+        res.close();
+    }
+//    } catch (e) {
+//        response.statusCode(404);
+//        response.write("command not found "+ e);
+//        response.close();
+//    }
+//        response.statusCode = 200;
+//        response.write('<html><body>Hello!</body></html>');
+//        response.close();
 
 }
 
-Server.prototype.command = function(login,password){
-    this.login = login;
-    this.password = password;
+Server.prototype.urlParse = function(url){
+    var pattern = "^(([^:/\\?#]+):)?(//(([^:/\\?#]*)(?::([^/\\?#]*))?))?([^\\?#]*)(\\?([^#]*))?(#(.*))?$";
+    var rx = new RegExp(pattern);
+    var parts = rx.exec(url);
+    var resultURL = {};
+    resultURL.href = parts[0] || "";
+    resultURL.protocol = parts[1] || "";
+    resultURL.host = parts[4] || "";
+    resultURL.hostname = parts[5] || "";
+    resultURL.port = parts[6] || "";
+    resultURL.pathname = parts[7] || "/";
+    resultURL.search = parts[8] || "";
+    resultURL.hash = parts[10] || "";
+    return resultURL
 }
-Server.prototype.command_screenshot = function (){
+
+Server.prototype.command_screenshot = function (name){
+    this.renderIndex = this.renderIndex || 0;
+    this.renderIndex++;
+    this.page.render('render/' + (name?name:"img" + this.renderIndex));
+}
+
+Server.prototype.command_ls = function(req,res,url){
+
+    res.setHeader("Content-Type", "text/html;charset=utf-8");
+    var obj = this;
+    res.write("<ul>");
+    for(var m in obj) {
+        if(typeof obj[m] == "function") {
+            if (m.indexOf(this.FUNCTION_SIGNATURE)==0){
+                var command = m.slice(this.FUNCTION_SIGNATURE.length);
+                res.write("<li>");
+                res.write("<a href='http://" + this.serverBind + '/' + command + "'>" + command + "<a/>");
+                res.write("</li>");
+
+            }
+        }
+    }
+
+    res.write("</ul>");
+    res.close();
 
 }
 
-module.exports = QiwiClient;
+
+
+module.exports.client = QiwiClient;
+module.exports.server = Server;
