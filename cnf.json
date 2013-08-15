@@ -1,7 +1,0 @@
-{
-    "password":"bJhnd63k11",
-    "login":"+79119139834",
-    "invoice":"http://localhost:8000/update",
-    "report":"node testnode.js",
-    "timeoutCheck": 600000
-}
