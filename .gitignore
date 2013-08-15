@@ -6,4 +6,5 @@
 *.ini
 *.cnf
 cnf.json
+*.json
 

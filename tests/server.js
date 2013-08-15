@@ -1,7 +1,8 @@
-var Server = require("../qiwi").server;
+var Server = require("../server");
 
 var server = new Server();
-server.init();
+//console.log(Server)
+server.runServer();
 
 //console.log(server.urlParse("/rrrfsd44"))
 
