@@ -75,4 +75,4 @@ Log.prototype.emerg = function () {
 
 }
 
-module.exports = Log;
+module.exports = new Log();
