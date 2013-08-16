@@ -1,5 +1,9 @@
-var Log = function (param, level) {
+var Log = function () {
     this.timestamp = new Date();
+    this.levels = ['debug','info','notice','warning','error','critical','alert','emerg']
+}
+Log.prototype.set = function (level, stream) {
+    this.stream = stream;
 }
 Log.prototype._argumentsToMsg = function () {
     var argumentsArray = Array.prototype.slice.call(arguments, 0);
@@ -15,6 +19,12 @@ Log.prototype.standartOutput = function (level, msg) {
     var timestamp = new Date();
     timestamp = timestamp - this.timestamp;
     console.log(timestamp + ": " + level + ">> " + msg);
+}
+
+Log.prototype.paranoic = function () {
+    // Параноидальный дебаг
+    var level = "PARANOIC";
+    return this.standartOutput(level, this._argumentsToMsg.apply(this, arguments));
 }
 
 
