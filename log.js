@@ -8,9 +8,16 @@ Log.prototype.set = function (level, stream) {
 Log.prototype._argumentsToMsg = function () {
     var argumentsArray = Array.prototype.slice.call(arguments, 0);
     var msg = argumentsArray[0];
+    for (var i = 1; i < argumentsArray.length; i++) {
+        var obj = argumentsArray[i];
+        if (typeof obj == "function"){
+            msg += obj.toString().slice(0,160);
+        } else if (obj==undefined){
 
-    if (argumentsArray.length > 1) {
-        msg += JSON.stringify(argumentsArray.slice(1));
+        } else {
+            msg += JSON.stringify(obj);
+        }
+        msg += ", "
     }
     return msg
 }
