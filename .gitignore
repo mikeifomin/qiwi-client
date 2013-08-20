@@ -7,4 +7,5 @@
 *.cnf
 cnf.json
 *.json
+/tests/render/
 

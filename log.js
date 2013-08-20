@@ -19,7 +19,7 @@ Log.prototype._argumentsToMsg = function () {
         }
         msg += ", "
     }
-    return msg
+    return msg.slice(0,700)
 }
 
 Log.prototype.standartOutput = function (level, msg) {

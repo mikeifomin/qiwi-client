@@ -1,7 +1,6 @@
 var webserver = require("webserver");
 var system = require('system');
 var log = require("./log");
-log.debug("server module loaded");
 
 
 function Server(bind){
@@ -47,15 +46,17 @@ Server.prototype.urlParse = function(url){
 Server.prototype.requestHeader = function(req, res){
     log.debug("Got server request ", req.url);
     var url = this.urlParse(req.url);
+    var parsedPath = url.pathname.split("/");
+    var property = this.COMMAND_FUNCTION_NAME_SIGNATURE + parsedPath[1];
+    var parsedArgs = parsedPath.slice(2);
 
-    var property = this.COMMAND_FUNCTION_NAME_SIGNATURE + url.pathname.slice(1).replace("/","_");
     log.debug("Try to find function ", property);
     if (typeof this[property] == "function") {
         try{
             log.debug("Found ", property);
             res.statusCode = 200;
             res.setHeader("Content-Type", "text/html;charset=utf-8");
-            var result = this[property].call(this, req, res, url);
+            var result = this[property].call(this, req, res, parsedArgs);
 
             if (typeof result == "string"){
                 log.debug("Function `" + property + "` returned string, so closing and send to client response ",result);
@@ -87,7 +88,7 @@ Server.prototype.requestHeader = function(req, res){
 
 
 
-Server.prototype.command_screenshot = function (req,res,url,name){
+Server.prototype.command_screenshot = function (req,res,argv){
     log.debug("Rendered screenshot function")
     if (this.page) {
         this.renderIndex = this.renderIndex || 0;
@@ -104,19 +105,19 @@ Server.prototype.command_screenshot = function (req,res,url,name){
     }
 }
 
-Server.prototype.command_sys = function (req,res,url,name){
+Server.prototype.command_sys = function (req,res,argv){
     log.debug("Return `system` var",system);
     return JSON.stringify(system);
 }
 
 
-Server.prototype.command_dump = function (req,res,url,name){
+Server.prototype.command_dump = function (req,res,argv){
     log.debug("Return `this` var",this);
     return JSON.stringify(this);
 
 }
 
-Server.prototype.command_ls = function(req,res,url){
+Server.prototype.command_ls = function(req,res,argv){
     log.debug("Return list of available commands");
     var html = ""
     var obj = this;

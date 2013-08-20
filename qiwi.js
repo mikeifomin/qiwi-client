@@ -28,7 +28,7 @@ function QiwiClient(config) {
     this.is_run = false;
     log.debug("Qiwi constructor with config ", this.config)
 }
-//QiwiClient.prototype = new Server();
+
 QiwiClient.prototype.run = function () {
     log.debug("Execute run method");
     this.page = webpage.create();
@@ -50,7 +50,7 @@ QiwiClient.prototype.run = function () {
         })(this),
         this.config.timeoutCheck || 1000 * 60 * 10
     )
-
+    this._stackWatcherInterval = 100;
     this.accountBalance = undefined;
 
     if (this.config.invoice || this.config.report) {
@@ -79,22 +79,30 @@ QiwiClient.prototype.run = function () {
 
 QiwiClient.prototype.ResourceWatcherForCheckBalance = function (response) {
     if (response.url == "https://visa.qiwi.com/person/state.action") {
-        var balance = this.page.evalute(function () {
+        log.debug("Page request accout state");
+        var balance = this.page.getRawBalance.call(this);
 
-            // get raw string "    233 597,72 RUB      "
-            var balance = $("#profileBalance .ui-selectmenu-text").text();
-
-            // parse to array like this ["233597", "72", "RUB"]
-            balance = balance.replace(/[^0-9,A-Z]/g, "").match(/[0-9]+|[A-Z]+/g);
-
-            return balance;
-        })
         if (this.accountBalance.join("") != balance.join("")) {
+            log.notice("Account balance is changed", balance)
             this.onBalanceChange();
         }
     }
 }
 
+QiwiClient.prototype.getRawBalance = function(){
+    var balance = this.page.evalute(function () {
+
+        // get raw string "    233 597,72 RUB      "
+        var balance = $("#profileBalance .ui-selectmenu-text").text();
+
+        // parse to array like this ["233597", "72", "RUB"]
+        balance = balance.replace(/[^0-9,A-Z]/g, "").match(/[0-9]+|[A-Z]+/g);
+
+        return balance;
+    })
+    log.notice("Current balance is ",balance);
+    return balance;
+}
 
 QiwiClient.prototype.watchDog = function () {
     this.onBalanceChange();
@@ -117,7 +125,7 @@ QiwiClient.prototype.flushStack = function () {
 QiwiClient.prototype.push = function (fn) {
 
     var params = Array.prototype.slice.call(arguments, 1);
-    log.debug("Push ASYNC job to stack params and fn", params, fn.toString().slice(0, 200));
+    log.debug("Push ASYNC job to stack params and fn", params, fn);
 
     this.stack.push({
         func: fn,
@@ -128,10 +136,11 @@ QiwiClient.prototype.push = function (fn) {
 }
 QiwiClient.prototype.push_sync = function (fn) {
     var params = Array.prototype.slice.call(arguments, 1);
-    log.debug("Push SYNC job to stack params and fn", params, fn.toString().slice(0, 200));
+
+    log.debug("Push SYNC job to stack params and func", params, fn);
 
     this.stack.push({
-        fn: fn,
+        func: fn,
         params: params,
         sync: true
     })
@@ -139,28 +148,31 @@ QiwiClient.prototype.push_sync = function (fn) {
 
 QiwiClient.prototype.nextStep = function () {
     log.debug('Execute `nextStep()`');
-    if (this.stack.length) {
+    if (this.stack.length > 0) {
         var currentJob = this.stack.shift();
 
-        log.debug("Shift " + (currentJob.sync ? "SYNC" : "ASYNC") + " job from stack ", currentJob.func.toString().slice(0, 100));
+        log.debug("Shift " + (currentJob.sync ? "SYNC" : "ASYNC") + " job from stack ", currentJob.func);
 
         // execute function (with params) from stack
         this.lastResult = currentJob.func.apply(this, currentJob.params);
-
+        this.command_screenshot();
         this.lastJob = currentJob;
         if (currentJob.sync) {
             this.nextStep();
+        } else {
+            this.waitLoading = true;
         }
 
     } else {
-        this._stackWatcher = setInterval(function (self) {
+        this._stackWatcher = setInterval((function (self) {
             return function () {
                 if (self.stack.length > 0){
                     log.debug("stackWatcher detect stack not empty, so execute `nextStep()`") ;
+                    clearInterval(self._stackWatcher);
                     self.nextStep();
                 }
             };
-        },this._stackWatcherInterval || 100)
+        })(this),this._stackWatcherInterval);
         log.debug("Stack empty, watcher checked every " + this._stackWatcherInterval + " miliseconds")
     }
 }
@@ -183,8 +195,8 @@ QiwiClient.prototype.submit = function (formData, selector, submitSelector) {
     log.debug("Submit form ", formData, selector, submitSelector);
 
     var result = this.page.evaluate(function (formData, selector, submitSelector) {
-        console.log("Js code run ");
-        console.log($.toString().slice(0,20));
+//        console.log("Js code run ");
+//        console.log($.toString().slice(0,20));
         var form = $(selector);
         for (var fieldKey in formData) {
             var value = formData[fieldKey];
@@ -192,16 +204,16 @@ QiwiClient.prototype.submit = function (formData, selector, submitSelector) {
             console.log("field: "+ fieldKey + " = "+ value);
         }
 
-        var submitControl = $(submitSelector, form)
-        console.log("value parameter of submit button DOM element: " + submitControl.val());
+        var submitControl = $(submitSelector, form);
+//        console.log("value parameter of submit button DOM element: " + submitControl.val());
         submitControl.click();
-        return form;
+//        return form;
 
-    }, formData, selector, submitSelector)
-    if (result){
-        result = result.toString().slice(0,200)
-    }
-    log.debug("Browser say: ", result)
+    }, formData, selector, submitSelector);
+//    if (result){
+//        result = result.toString().slice(0,200)
+//    }
+//    log.debug("Browser say: ", result)
 }
 
 
@@ -211,7 +223,7 @@ QiwiClient.prototype.doLogin = function () {
         this.page.open(this.base_URL + this.login_URL)
     });
 
-    this.push(
+    this.push_sync(
         this.submit,
         {
             "#phone": this.config.login,
@@ -219,17 +231,97 @@ QiwiClient.prototype.doLogin = function () {
         },
         "#userMenu"
     );
-    this.push_sync()
+    this.push(function () {
+        this.ajaxWaitingTimer = setInterval((function (self) {
+            return function(){
 
+                var result = self.page.evaluate(function(){
+//                    var passwd = "none";
+                    var account  = "" ;
+                    try{
+                        var passwd = $("form #password").html();
+                        var account = $("#profileBalance").text();
+                    } catch (e){
 
-}
-QiwiClient.prototype.authDetect = function () {
+                    }
+                    return account;
+                })
+
+                   if (result.search("Баланс")){
+                        log.notice("Auth success!") ;
+                        clearInterval(self.ajaxWaitingTimer);
+                        self.nextStep();
+
+                    }
+            }
+       })(this) ,100)
+
+    })
 
 }
 
 
 QiwiClient.prototype.makePay = function (account, amount, comment, cb) {
 
+}
+QiwiClient.prototype.command_invoice = function (req, res, argv) {
+    var account = argv[0].replace("%2B","+");
+    var amount = argv[1];
+    var comment = argv[2]||"";
+
+    this.push(function  () {
+    this.page.open(this.base_URL + this.invoice_URL,function () {
+        log.warning("loaded");
+        } );
+        log.debug(this.base_URL + this.invoice_URL);
+    } )
+        ;
+
+    this.push_sync(
+        this.submit,
+        {
+            "#to": account,
+            "#value": amount,
+            "#comment": comment
+
+        },
+        ".createBill form"
+    );
+
+    this.push(function(){
+        log.debug("check invoice");
+        this.invoiceCheckInterval = setInterval((function (self) {
+             return function(){
+                 var result = self.page.evaluate(function(){
+
+                     return $(".resultPage").text()
+                 })
+                 if (result){
+                     if (result.search("успешно")) {
+//                         log.notice(result);
+                          clearInterval(self.invoiceCheckInterval);
+                         log.notice("invoice done");
+                     }
+                     else if (result.search("ошибка")) {
+
+                     } else {
+                         log.warning("make invoice FAIL");
+                     }
+                 }
+
+
+
+             }
+
+
+            ;
+        } )(this),100)
+
+    })
+
+
+//    this.push(this.)
+//    this.makeInvoice.call(this,)
 }
 
 QiwiClient.prototype.makeInvoice = function (account, amount, comment, cb) {
