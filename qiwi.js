@@ -30,11 +30,11 @@ function QiwiClient(config) {
 }
 
 QiwiClient.prototype.run = function () {
-    log.debug("Execute run method");
+    log.notice("Start QIWI watcher");
     this.page = webpage.create();
     this.page.settings.userAgent = 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/28.0.1500.95 Safari/537.36';
 
-    log.debug("Inherit super methods from server parent");
+//    log.debug("Inherit super methods from server parent");
     this.super.constructor.apply(this);
     this.super.runServer.apply(this);
 
@@ -53,12 +53,13 @@ QiwiClient.prototype.run = function () {
     this._stackWatcherInterval = 100;
     this.accountBalance = undefined;
 
+    // watch for change balance if in settings set invoice or report watcher
     if (this.config.invoice || this.config.report) {
         // TODO: what about `this`?  use javascript closure!
         this.page.onResourceReceived = this.ResourceWatcherForCheckBalance
     }
 
-    this.page.onLoadFinished = (function (self) {
+    this.page.onLoadFinished1 = (function (self) {
         return function (status) {
 
             if (status == "success") {
@@ -69,6 +70,25 @@ QiwiClient.prototype.run = function () {
             }
         }
     })(this);
+    this.page.onConsoleMessage = function(msg, lineNum, sourceId) {
+        log.debug('CONSOLE: ' + msg + ' (from line #' + lineNum + ' in "' + sourceId + '")');
+    };
+    this.pageLoaded = false;
+
+    this.page.onLoadFinished = (function(self){
+        return function(status) {
+            self.pageLoaded = true;
+            log.notice("pageLoaded = ",self.pageLoaded)
+        }
+    })(this);
+    this.page.onLoadStarted = (function(self){
+        return function(status) {
+            self.pageLoaded = false;
+            log.notice("pageLoaded = ",self.pageLoaded)
+        }
+    })(this) ;
+
+
 
     log.debug("First of all add to stack login job");
     this.doLogin();
@@ -122,45 +142,143 @@ QiwiClient.prototype.flushStack = function () {
 }
 
 
-QiwiClient.prototype.push = function (fn) {
+QiwiClient.prototype.add = function (fn, done_signature, err_signature, err_fn) {
+    /* done may be
+      function that return true if go next job
+      string - css path like #enyID.any-class
+      string - pain text pattern seek contain="text to seek"
 
-    var params = Array.prototype.slice.call(arguments, 1);
-    log.debug("Push ASYNC job to stack params and fn", params, fn);
 
-    this.stack.push({
-        func: fn,
+      fn maybe
+      function
+      object with params and function like {fn:function(key1,key3){console.log("hi")},param:[key1,key2]}
+    */
+
+    var func = null;
+    var params = [];
+    if (typeof fn == "object" && fn.hasOwnProperty("params") && fn.hasOwnProperty("fn") ){
+        // fn == {fn:function(param1,param2){},params:[param1,param2]}
+        if (typeof fn.fn == "function"){
+            func = fn.fn;
+            params = fn.params;
+            if (!(params instanceof Array)){
+                params = [params];
+            }
+        } else {
+            log.warning("Wrong format job", fn)  ;
+            return;
+        }
+
+
+    } else if (typeof fn == "function") {
+        func = fn;
+    }
+
+
+    var check_done_fn = null;
+    var check_done_fn_params = [];
+
+    if (typeof done_signature  ==  typeof "String"){
+
+        check_done_fn = function (sinature) {
+
+
+            return this.page.content.search(sinature) != -1
+        }
+        check_done_fn_params = [done_signature];
+    } else if (typeof done_signature == "function"){
+        check_done_fn = done_signature;
+        check_done_fn_params = [];
+
+    } else if (typeof done_signature == "object" && done_signature.hasOwnProperty("params") && done_signature.hasOwnProperty("fn") ){
+        // done == {fn:function(param1,param2){},params:[param1,param2]}
+        if (typeof done_signature.fn == "function"){
+           check_done_fn = done_signature;
+        }
+        check_done_fn_params = [];
+
+
+    } else if (done_signature === true){
+        // sync function
+        check_done_fn = true;
+    }
+
+    var check_err_fn = null;
+    var check_err_fn_params = [];
+
+    if  (typeof err_signature == "string") {
+
+    } else if (typeof err_signature == "function") {
+
+    } else if (typeof err_signature == "object" && err_signature.hasOwnProperty("params") && err_signature.hasOwnProperty("fn") ){
+
+    }
+
+    var err_fn = null;
+    if (typeof err_fn == "function"){
+
+    }
+
+    var stackObj = {
+        func: func,
         params: params,
-        sync: false
-    })
+        check_done_fn: check_done_fn,
+        check_done_fn_params: check_done_fn_params,
+
+        check_err_fn: check_err_fn,
+        check_err_fn_params: check_err_fn_params,
+
+        err_fn:err_fn
+
+
+    }
+    this.stack.push(stackObj)
 
 }
-QiwiClient.prototype.push_sync = function (fn) {
-    var params = Array.prototype.slice.call(arguments, 1);
 
-    log.debug("Push SYNC job to stack params and func", params, fn);
-
-    this.stack.push({
-        func: fn,
-        params: params,
-        sync: true
-    })
-}
-
-QiwiClient.prototype.nextStep = function () {
+QiwiClient.prototype.nextStep = function (isRepeatStep) {
     log.debug('Execute `nextStep()`');
     if (this.stack.length > 0) {
-        var currentJob = this.stack.shift();
-
-        log.debug("Shift " + (currentJob.sync ? "SYNC" : "ASYNC") + " job from stack ", currentJob.func);
+        var cj = this.stack.shift();
+        this.currentJob = cj;
 
         // execute function (with params) from stack
-        this.lastResult = currentJob.func.apply(this, currentJob.params);
-        this.command_screenshot();
-        this.lastJob = currentJob;
-        if (currentJob.sync) {
+        this.lastResult = cj.func.apply(this, cj.params);
+
+        if (cj.check_fn === true) {
             this.nextStep();
         } else {
-            this.waitLoading = true;
+            this._resultWatcher = setInterval((function (self) {
+                return function () {
+                    log.debug("resultWatcher execute ",self.page.content.length);
+                    if (self.pageLoaded === false){
+                        log.debug("page not loaded ",self.pageLoaded );
+                        return;
+                    }
+                    var cj = self.currentJob;
+                    log.debug("do job ",cj );
+
+                    var checkResult = cj.check_done_fn.apply(self,cj.check_done_fn_params);
+                    var errResult = false;
+                    if (typeof cj.check_err_fn == "function"){
+                        errResult = cj.check_err_fn.apply(self,cj.check_err_fn_params);
+                    }
+                    if (errResult === true){
+                        log.warning('Error is happend');
+
+                        cj.err_fn.apply(self,cj.err_fn_params);
+                    } else if (checkResult === true){
+                         log.debug('Result is ok')
+                    } else {
+                        log.debug("no result(err or ok) detected");
+                        return                                     ;
+                    }
+                    log.debug("clear interval and go nextStep()")   ;
+                    clearInterval(self._resultWastcher);
+                    self.nextStep();
+
+                }
+            } )(this), 200);
         }
 
     } else {
@@ -179,7 +297,6 @@ QiwiClient.prototype.nextStep = function () {
 
 QiwiClient.prototype.open = function (url) {
     log.debug('try to open ', url);
-    log.debug('this.page ', this.page);
     this.page.open(url, (function (self) {
         var f = function (status) {
             self.nextStep();
@@ -189,74 +306,82 @@ QiwiClient.prototype.open = function (url) {
 }
 
 QiwiClient.prototype.submit = function (formData, selector, submitSelector) {
-
     var submitSelector = submitSelector || "[value=submit]" ;
-
     log.debug("Submit form ", formData, selector, submitSelector);
-
+//    this.page.includeJs("http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js")
     var result = this.page.evaluate(function (formData, selector, submitSelector) {
-//        console.log("Js code run ");
-//        console.log($.toString().slice(0,20));
-        var form = $(selector);
-        for (var fieldKey in formData) {
-            var value = formData[fieldKey];
-            $(fieldKey, form).val(value).keyup();
-            console.log("field: "+ fieldKey + " = "+ value);
+
+        try{
+//            var form = document.querySelectorAll(selector);
+            var form = $(selector);
+            console.log(form);
+            console.log(formData);
+            for (var fieldKey in formData) {
+                var value = formData[fieldKey];
+                $(fieldKey, form).val(value).keyup();
+                console.log("field: "+ fieldKey + " = "+ value);
+            }
+            var submitControl = $(submitSelector, form);
+            submitControl.click();
+            return form;
+        } catch (e){
+            return e;
         }
-
-        var submitControl = $(submitSelector, form);
-//        console.log("value parameter of submit button DOM element: " + submitControl.val());
-        submitControl.click();
-//        return form;
-
     }, formData, selector, submitSelector);
-//    if (result){
-//        result = result.toString().slice(0,200)
-//    }
-//    log.debug("Browser say: ", result)
+    log.debug("Submit return ", result);
 }
-
+QiwiClient.prototype.openUrl = function (url){
+        this.page.open(url);
+}
 
 QiwiClient.prototype.doLogin = function () {
     log.notice("Login with ", this.config.login);
-    this.push(function () {
-        this.page.open(this.base_URL + this.login_URL)
-    });
 
-    this.push_sync(
-        this.submit,
+    this.add(
         {
-            "#phone": this.config.login,
-            "#password": this.config.password
+            fn:this.page.open,
+            params:this.base_URL + this.login_URL
         },
-        "#userMenu"
+        "id=\"password\"");
+
+    this.add(
+        {
+            fn: this.submit,
+            params: [{
+                        "#phone": this.config.login,
+                        "#password": this.config.password
+                    },
+                    "#userMenu"
+                    ]
+        },
+        "id=\"profileLogin\"","class=\"errorMessageBlock\""
     );
-    this.push(function () {
-        this.ajaxWaitingTimer = setInterval((function (self) {
-            return function(){
-
-                var result = self.page.evaluate(function(){
-//                    var passwd = "none";
-                    var account  = "" ;
-                    try{
-                        var passwd = $("form #password").html();
-                        var account = $("#profileBalance").text();
-                    } catch (e){
-
-                    }
-                    return account;
-                })
-
-                   if (result.search("Баланс")){
-                        log.notice("Auth success!") ;
-                        clearInterval(self.ajaxWaitingTimer);
-                        self.nextStep();
-
-                    }
-            }
-       })(this) ,100)
-
-    })
+//    this.add(function () {
+//        this.ajaxWaitingTimer = setInterval((function (self) {
+//            return function(){
+//
+//                var result = self.page.evaluate(function(){
+////                    var passwd = "none";
+//                    var account  = "" ;
+//                    try{
+//                        var passwd = $("form #password").html();
+//                        var account = $("#profileBalance").text();
+//                    } catch (e){
+//
+//                    }
+//                    return account;
+//                })
+//
+//                   if (result.search("Баланс")){
+//                        log.notice("Auth success!") ;
+//                        clearInterval(self.ajaxWaitingTimer);
+//                        self.nextStep();
+//
+//                    }
+//            }
+//       })(this) ,100)
+//
+//    })
 
 }
 
@@ -264,6 +389,7 @@ QiwiClient.prototype.doLogin = function () {
 QiwiClient.prototype.makePay = function (account, amount, comment, cb) {
 
 }
+
 QiwiClient.prototype.command_invoice = function (req, res, argv) {
     var account = argv[0].replace("%2B","+");
     var amount = argv[1];
@@ -481,15 +607,25 @@ QiwiClient.prototype.sendToExternal = function (address, data) {
     }
 }
 
+QiwiClient.prototype.command_next = function () {
+    this.nextStep();
+    return "ok, go next";
+}
 QiwiClient.prototype.command_stack = function () {
     var result = "Stack length = " + this.stack.length + " ";
     log.notice(result);
     for (var i = 0; i < this.stack.length; i++) {
         var item = this.stack[i];
+        for  (var j in item) {
+            if (typeof item[j] == "function"){
+                item[j] = item[j].toString().slice(0, 100);
+            }
+        }
         var functionSignature = item.func.toString().slice(0, 100);
-        var obj = {fn: functionSignature, params: JSON.stringify(item.params), sync: item.sync};
+        var obj = {func: functionSignature, params: JSON.stringify(item.params), sync: item.sync};
         result += "\r\n Element " + i;
-        result += JSON.stringify(obj, null, 2)
+//        result += JSON.stringify(obj, null, 2)
+        result += JSON.stringify(item, null, 2)
     }
     return result
 }

@@ -8,7 +8,7 @@ Log.prototype.set = function (level, stream) {
 Log.prototype._argumentsToMsg = function () {
     var argumentsArray = Array.prototype.slice.call(arguments, 0);
     var msg = argumentsArray[0];
-    for (var i = 1; i < argumentsArray.length; i++) {
+    for (var i = (typeof msg == "string"? 1:0); i < argumentsArray.length; i++) {
         var obj = argumentsArray[i];
         if (typeof obj == "function"){
             msg += obj.toString().slice(0,160);
