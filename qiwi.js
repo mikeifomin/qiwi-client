@@ -58,7 +58,9 @@ QiwiClient.prototype.run = function () {
         // TODO: what about `this`?  use javascript closure!
         this.page.onResourceReceived = this.ResourceWatcherForCheckBalance
     }
-
+    this.page.onResourceRequested = function(requestData, networkRequest) {
+        console.log('Request (#' + requestData.id + '): ' + JSON.stringify(requestData));
+    };
     this.page.onLoadFinished1 = (function (self) {
         return function (status) {
 
@@ -207,7 +209,12 @@ QiwiClient.prototype.add = function (fn, done_signature, err_signature, err_fn) 
     var check_err_fn_params = [];
 
     if  (typeof err_signature == "string") {
+        check_err_fn = function (sinature) {
 
+
+            return this.page.content.search(sinature) != -1
+        }
+        check_err_fn_params = [err_signature];
     } else if (typeof err_signature == "function") {
 
     } else if (typeof err_signature == "object" && err_signature.hasOwnProperty("params") && err_signature.hasOwnProperty("fn") ){
@@ -252,7 +259,6 @@ QiwiClient.prototype.nextStep = function (isRepeatStep) {
                 return function () {
                     log.debug("resultWatcher execute ",self.page.content.length);
                     if (self.pageLoaded === false){
-                        log.debug("page not loaded ",self.pageLoaded );
                         return;
                     }
                     var cj = self.currentJob;
@@ -266,7 +272,10 @@ QiwiClient.prototype.nextStep = function (isRepeatStep) {
                     if (errResult === true){
                         log.warning('Error is happend');
 
-                        cj.err_fn.apply(self,cj.err_fn_params);
+//                        cj.err_fn.apply(self,cj.err_fn_params);
+
+
+
                     } else if (checkResult === true){
                          log.debug('Result is ok')
                     } else {
@@ -274,11 +283,11 @@ QiwiClient.prototype.nextStep = function (isRepeatStep) {
                         return                                     ;
                     }
                     log.debug("clear interval and go nextStep()")   ;
-                    clearInterval(self._resultWastcher);
+                    clearInterval(self._resultWatcher);
                     self.nextStep();
 
                 }
-            } )(this), 200);
+            } )(this), 100);
         }
 
     } else {
@@ -306,7 +315,7 @@ QiwiClient.prototype.open = function (url) {
 }
 
 QiwiClient.prototype.submit = function (formData, selector, submitSelector) {
-    var submitSelector = submitSelector || "[value=submit]" ;
+    var submitSelector = submitSelector || "[value=submit]";
     log.debug("Submit form ", formData, selector, submitSelector);
 //    this.page.includeJs("http://ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js")
     var result = this.page.evaluate(function (formData, selector, submitSelector) {
@@ -314,19 +323,37 @@ QiwiClient.prototype.submit = function (formData, selector, submitSelector) {
         try{
 //            var form = document.querySelectorAll(selector);
             var form = $(selector);
-            console.log(form);
-            console.log(formData);
+
             for (var fieldKey in formData) {
                 var value = formData[fieldKey];
-                $(fieldKey, form).val(value).keyup();
+                try{
+
+                    $(fieldKey, form).val(value).keyup();
+                } catch (e){
+                    console.log(e);
+                }
+                try {
+
+                    $(fieldKey + " option[value='"+value+"']").attr("selected", "selected");
+                } catch (e){
+                    console.log(e);
+                }
+
                 console.log("field: "+ fieldKey + " = "+ value);
             }
-            var submitControl = $(submitSelector, form);
-            submitControl.click();
+//            var submitControl = $(submitSelector, form);
+//            submitControl.click();
             return form;
         } catch (e){
             return e;
         }
+    }, formData, selector, submitSelector);
+
+    this.page.render("render/"+Math.random()+".png");
+    var sbt =  this.page.evaluate(function (formData, selector, submitSelector) {
+        var form = $(selector);
+        var submitControl = $(submitSelector, form);
+        submitControl.click();
     }, formData, selector, submitSelector);
     log.debug("Submit return ", result);
 }
@@ -356,32 +383,7 @@ QiwiClient.prototype.doLogin = function () {
         },
         "id=\"profileLogin\"","class=\"errorMessageBlock\""
     );
-//    this.add(function () {
-//        this.ajaxWaitingTimer = setInterval((function (self) {
-//            return function(){
-//
-//                var result = self.page.evaluate(function(){
-////                    var passwd = "none";
-//                    var account  = "" ;
-//                    try{
-//                        var passwd = $("form #password").html();
-//                        var account = $("#profileBalance").text();
-//                    } catch (e){
-//
-//                    }
-//                    return account;
-//                })
-//
-//                   if (result.search("Баланс")){
-//                        log.notice("Auth success!") ;
-//                        clearInterval(self.ajaxWaitingTimer);
-//                        self.nextStep();
-//
-//                    }
-//            }
-//       })(this) ,100)
-//
-//    })
+
 
 }
 
@@ -390,68 +392,39 @@ QiwiClient.prototype.makePay = function (account, amount, comment, cb) {
 
 }
 
+
+QiwiClient.prototype.makeInvoice = function (account, amount, comment) {
+
+
+    this.add({
+        fn:this.page.open,
+        params:this.base_URL + this.invoice_URL
+    },
+    "Выставить счёт"
+    );
+    this.add({
+                fn:this.submit,
+                params:[{
+                    "#to": account,
+                    "#value": amount,
+                    "#comment": comment,
+                    "#currency-select":"RUB"
+                    },
+                    ".createBill form"]
+            },
+            "Счет успешно выставлен",
+            "Счет не удалось выставить"
+    )
+}
+
+
+
+
 QiwiClient.prototype.command_invoice = function (req, res, argv) {
     var account = argv[0].replace("%2B","+");
     var amount = argv[1];
     var comment = argv[2]||"";
-
-    this.push(function  () {
-    this.page.open(this.base_URL + this.invoice_URL,function () {
-        log.warning("loaded");
-        } );
-        log.debug(this.base_URL + this.invoice_URL);
-    } )
-        ;
-
-    this.push_sync(
-        this.submit,
-        {
-            "#to": account,
-            "#value": amount,
-            "#comment": comment
-
-        },
-        ".createBill form"
-    );
-
-    this.push(function(){
-        log.debug("check invoice");
-        this.invoiceCheckInterval = setInterval((function (self) {
-             return function(){
-                 var result = self.page.evaluate(function(){
-
-                     return $(".resultPage").text()
-                 })
-                 if (result){
-                     if (result.search("успешно")) {
-//                         log.notice(result);
-                          clearInterval(self.invoiceCheckInterval);
-                         log.notice("invoice done");
-                     }
-                     else if (result.search("ошибка")) {
-
-                     } else {
-                         log.warning("make invoice FAIL");
-                     }
-                 }
-
-
-
-             }
-
-
-            ;
-        } )(this),100)
-
-    })
-
-
-//    this.push(this.)
-//    this.makeInvoice.call(this,)
-}
-
-QiwiClient.prototype.makeInvoice = function (account, amount, comment, cb) {
-
+    this.makeInvoice (account, amount, comment);
 }
 
 

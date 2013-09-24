@@ -86,8 +86,6 @@ Server.prototype.requestHeader = function(req, res){
 }
 
 
-
-
 Server.prototype.command_screenshot = function (req,res,argv){
     log.debug("Rendered screenshot function")
     if (this.page) {
